@@ -5,7 +5,7 @@
 ## T.Rex
 [![Video](https://img.youtube.com/vi/ivxIEHNXE9s/0.jpg)](https://www.youtube.com/watch?v=ivxIEHNXE9s)
 
-**[Образ МПО-10](https://github.com/azya52/seiko/tree/master/rom)**, для запуска на эмуляторе может потребоваться увеличить скорость эмуляции (параметр CpuSpeed).
+**[Образ СМП](https://github.com/azya52/seiko/tree/master/rom)**, для запуска на эмуляторе может потребоваться увеличить скорость эмуляции (параметр CpuSpeed).
 **[Исходный код](https://github.com/azya52/seiko/tree/master/rom)**, на ассемблере MACRO-11
 
 
