@@ -207,7 +207,7 @@ delay:
 	clrb @#^O165030
 	rts pc
 
-beep:
+beep::
 	mov @#beepFreqArd, r0
 	tst (r0)
 	bmi beepExit
@@ -218,15 +218,12 @@ beep:
 	mov (r0), @#SMPBAUD
 	tst	@#SMPCMD
 	clrb @#SMPCMD
-	jsr pc, waitSend
-	tst	@#SMPCMD
-	mov #^B11100011, @#SMPCS
-beepExit:
-	rts pc
-
 waitSend:
 	tstb @#SMPCS
 	bpl waitSend
+	tst	@#SMPCMD
+	mov #^B11100011, @#SMPCS
+beepExit:
 	rts pc
 
 keyIntHandle:
@@ -255,11 +252,12 @@ keyIntHandleEnd:
 
 
 updateTrex:
+	mov #trexFoot, r4
 	mov @#trexPosition, r1
 	movb (r1), r1
 	beq trexRun
 	;jumping
-	mov #trexFootBoth, @#trexFoot
+	mov #trexFootBoth, (r4)
 	dec @#trexPosition
 	jsr pc, randomize ;more random
 	br drawTrex
@@ -268,12 +266,12 @@ trexRun:
 	dec @#trexFootChange
 	bge drawTrex
 	mov #trexFootChangeDelay, @#trexFootChange
-	cmp #trexFootLeft, @#trexFoot
+	cmp #trexFootLeft, (r4)
 	beq trexSetFootRight
-	mov #trexFootLeft, @#trexFoot
+	mov #trexFootLeft, (r4)
 	br drawTrex
 trexSetFootRight:
-	mov #trexFootRight, @#trexFoot
+	mov #trexFootRight, (r4)
 
 drawTrex:
 	mov @#currentTrex, r0
@@ -287,32 +285,25 @@ drawTrex:
 	mov #SCRBUF+SCREEN_SIZE_B, r5 ;calc middle screen
 	jsr pc, drawLoop
 
-	mov @#trexFoot, r0
+	mov (r4), r0
 	mov #trexFootHeight, r2
 drawLoop:
 	cmp r1, r5
 	blt drawMovStr
-	sub #30*32-1, r1
+	sub #SCREEN_WIDTH_B*SCREEN_HEIGHT/2-1, r1
 drawMovStr:
+
+	mov #3, r3
+drawStrLoop:
 	bitb (r0), (r1)
 	beq noCollision1
 	inc @#collisionFlag
 noCollision1:
-	bisb (r0)+, (r1)
+	bisb (r0)+, (r1)+
+	inc r1
+	sob r3, drawStrLoop
 
-	bitb (r0), 2(r1)
-	beq noCollision2
-	inc @#collisionFlag
-noCollision2:
-	bisb (r0)+, 2(r1)
-
-	bitb (r0), 4(r1)
-	beq noCollision3
-	inc @#collisionFlag
-noCollision3:
-	bisb (r0)+, 4(r1)
-
-	add #SCREEN_WIDTH_B, r1
+	add #SCREEN_WIDTH_B-6, r1
 	sob r2, drawLoop
 	rts pc
 
@@ -327,6 +318,7 @@ updateCactus:
 	cmp (r5), #-btmCactusMaxWidth
 	bgt updateCactusEnd
 
+getLastCactusX:
 	clr (r5)
 	clr r3
 	add @#firstCactusX, r3
@@ -365,6 +357,7 @@ updateCloud:
 	cmp (r5), #-btmCloudWidth
 	bgt updateCloudNext
 
+getLastCloudX:
 	mov @#firstCloudX, (r5)
 	cmp (r5), @#secondCloudX
 	bge 1$
