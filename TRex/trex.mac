@@ -47,9 +47,7 @@ loaderClearScreenLoop:
 	; specify the SMP address
 	mtps #^O340		;disable interrupts
 	bis	#8, r5		;writing to the SMP
-change:
 	mov	r5,(r1)
-	mov	#1245, @#change
 	mov	#^O240, @#SMPCMD	;Write Address
 	jsr	pc,(r2)
 	mov #start/256, @#SMPIO	;high address byte

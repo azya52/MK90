@@ -1,0 +1,113 @@
+	;
+	;	Grayscale Image Viewer for MK 90
+	;	Alexander Zakharyan
+	;	2019
+	;
+		
+	.ENABL AMA
+	.ASECT
+	.RADIX 10
+
+	.= 0
+
+	PRINTATTRS = ^O34072
+	PRINTNUM = ^O153360 
+	PRINT = ^O153414 
+	INITRAM = ^O153700
+	INITTTY = ^O120536
+	LCDINA = ^O164000
+	LCDINB = ^O164002
+	WAITCOMM = ^O174506
+	SMPCMD = ^O164026
+	SMPBAUD = ^O164022
+	SMPCS = ^O164024
+	SMPIO = ^O164020
+	GETCH = ^O131120
+	PUTCH = ^O116542
+	RTCSEC = ^O165000
+	RTCMIN = ^O165004
+
+	SCREEN_WIDTH_B = 30
+	SCREEN_WIDTH_W = SCREEN_WIDTH_B/2
+	SCREEN_SIZE_B = 960
+	SCREEN_SIZE_W = SCREEN_SIZE_B/2
+	SCREEN_HEIGHT = 64
+	SCREEN_WIDTH = 120
+    END = 960*9+512
+
+	nop
+	br loader
+
+	.= 32
+loader:
+	mov #color0, r4
+	mov	#SCREEN_SIZE_W, r3
+loaderClearScreenLoop:
+	clr	(r4)+
+	sob	r3, loaderClearScreenLoop
+
+	mov	#color0, @#LCDINA
+	mov #^B1000001011000110, @#LCDINB	;104Hz
+	
+	;Loader copyed from Game of Life app of Piotr Piatek
+	; specify the SMP address
+	mtps #^O340		;disable interrupts
+	bis	#8, r5		;writing to the SMP
+	mov	r5,(r1)
+	mov	#^O240, @#SMPCMD	;Write Address
+	jsr	pc,(r2)
+	mov #start/256, @#SMPIO	;high address byte
+	jsr	pc,(r2)
+	mov #start, @#SMPIO	;high address byte
+	jsr	pc, (r2)
+	tst	@#SMPCMD
+	jsr	pc, (r2)
+	; load data
+	mov	#END-START, r4		;number of bytes
+	mov	#START, r3
+	mov	#^O320, @#SMPCMD	;Read Postincrement
+	jsr	pc, (r2)
+	bic	#8, r5		;reading from the SMP
+	mov	r5, (r1)
+	jsr	pc, (r2)
+nxtb:	
+	movb @#SMPIO, (r3)+	;read data byte from the SMP to the RAM
+	jsr	pc, (r2)
+	sob	r4, nxtb		;next data byte
+	tst	@#SMPCMD
+	jsr	pc, (r2)
+	; start the loaded program
+	mov	#^O340, -(sp)	;user mode, interrupts disabled
+	;mov	#^O000, -(sp)	;user mode, interrupts enable
+	mov	#start, -(sp)
+	rti
+
+START:
+	mov #^B11111100, @#SMPCS	;select unused 4 device
+	mov #488, @#SMPBAUD	;set freq devider = 800000/16/104 + some factor
+	clrb @#SMPCMD
+
+main:
+	;delay
+waitSend:
+	tstb @#SMPCS
+	bpl waitSend
+	clrb @#SMPCMD
+
+	mov @#currentColor, @#LCDINA
+	add #SCREEN_SIZE_B, @#currentColor
+	cmp @#currentColor, @#lastColor
+	ble main
+	mov #color0,  @#currentColor
+
+	br main
+
+
+currentColor:
+	.word color0
+
+    .= 512
+lastColor:
+    .word 0
+
+color0:
