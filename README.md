@@ -19,8 +19,8 @@
 
 **[img2smp](https://github.com/azya52/MK90/blob/master/grayscale/img2smp.py)**, скрипт для конвертации индексированного png (120x64 до 10 оттенков) сразу в образ смп.
 
-**[img2mac](https://github.com/azya52/MK90/blob/master/grayscale/img2smp.py)**, скрипт для конвертации индексированного png (120x64 до 10 оттенков) в исходный код готовый для вставки в grayscaleIO.mac.
+**[img2mac](https://github.com/azya52/MK90/blob/master/grayscale/img2mac.py)**, скрипт для конвертации индексированного png (120x64 до 10 оттенков) в исходный код готовый для вставки в grayscaleIO.mac.
 
-**[img2mac](https://github.com/azya52/MK90/blob/master/grayscale/grayscaleIO.mac)**, код просмотрщика.
+**[grayscaleIO.mac](https://github.com/azya52/MK90/blob/master/grayscale/grayscaleIO.mac)**, код просмотрщика.
 
 **[lena6c.bin](https://github.com/azya52/MK90/blob/master/grayscale/lena6c.mac)**, готовый смп-образ с примером.
