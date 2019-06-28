@@ -23,4 +23,4 @@
 
 **[grayscaleIO.mac](https://github.com/azya52/MK90/blob/master/grayscale/grayscaleIO.mac)**, код просмотрщика.
 
-**[lena6c.bin](https://github.com/azya52/MK90/blob/master/grayscale/lena6c.mac)**, готовый смп-образ с примером.
+**[space6c.bin](https://github.com/azya52/MK90/blob/master/grayscale/space6c.mac), [lena6c.bin](https://github.com/azya52/MK90/blob/master/grayscale/lena6c.mac)**, готовые смп-образы с примерами.
