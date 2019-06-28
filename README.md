@@ -17,9 +17,9 @@
 
 Эксперимент с выводом изображений в оттенках серого. Без видимого мерцания получается отображать до 6 оттенков включая белый, на 7 уже появляется немного заметное мерцание. Корректно работает только на реальном устройстве.
 
-**[img2smp](https://github.com/azya52/MK90/blob/master/grayscale/img2smp.py)**, скрипт для конвертации индексированного png (120x64 до 10 оттенков) сразу в образ смп.
+**[img2smp](https://github.com/azya52/MK90/blob/master/grayscale/img2smp.py)**, Python скрипт для конвертации индексированного png (120x64 до 10 оттенков) сразу в образ смп.
 
-**[img2mac](https://github.com/azya52/MK90/blob/master/grayscale/img2mac.py)**, скрипт для конвертации индексированного png (120x64 до 10 оттенков) в исходный код готовый для вставки в grayscaleIO.mac.
+**[img2mac](https://github.com/azya52/MK90/blob/master/grayscale/img2mac.py)**, то же, но выдает исходный код готовый для вставки в grayscaleIO.mac.
 
 **[grayscaleIO.mac](https://github.com/azya52/MK90/blob/master/grayscale/grayscaleIO.mac)**, код просмотрщика.
 
