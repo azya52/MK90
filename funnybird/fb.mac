@@ -1,0 +1,1918 @@
+    ;
+    ;   Flappy Bird port for Elektronika MK 90
+    ;   Alexander Zakharyan
+    ;   2019
+    ;
+        
+    .ENABL AMA
+    .ASECT
+    .RADIX 10
+
+    .= 0
+
+    PRINTATTRS = ^O34072
+    PRINTNUM = ^O153360 
+    PRINT = ^O153414 
+    INITRAM = ^O153700
+    INITTTY = ^O120536
+    LCDINA = ^O164000
+    LCDINB = ^O164002
+    WAITCOMM = ^O174506
+    SMPIO = ^O164020
+    SMPBAUD = ^O164022
+    SMPCS = ^O164024
+    SMPCMD = ^O164026
+    GETCH = ^O131120
+    PUTCH = ^O116542
+    RTCSEC = ^O165000
+    RTCMIN = ^O165004
+
+    SCR_WIDTH_B = 30
+    SCR_WIDTH_W = SCR_WIDTH_B/2
+    SCR_SIZE_B = 960
+    SCR_SIZE_W = SCR_SIZE_B/2
+    SCR_HEIGHT = 64
+    SCR_WIDTH = 120
+    BOUDRATE = 504 ;freq devider = 1600000/8/208/2 + magic
+
+    nop
+    br loader
+
+    .= 32
+loader:
+    mtps #^O340
+
+    mov #clearScreenAdr, r4
+    mov r4, @#LCDINA
+    mov #^B1000001011000110, @#LCDINB   ;~208Hz
+    mov #SCR_SIZE_W, r3
+loaderClearScreenLoop:
+    clr (r4)+
+    sob r3, loaderClearScreenLoop
+
+    mov #loading, r0
+    mov #SCR_WIDTH_B*13+clearScreenAdr+14, r4
+loaderClearScreenHalf:
+    mov #19, r3
+loaderClearScreenLoop1:
+    movb (r0)+, (r4)
+    add #SCR_WIDTH_B, r4
+    sob r3, loaderClearScreenLoop1
+
+    sub #SCR_SIZE_B-1, r4
+    bit #1, r4
+    bne loaderClearScreenHalf
+
+    ;Loader copyed from Game of Life app of Piotr Piatek
+    ; specify the SMP address
+    bis #8, r5      ;writing to the SMP
+    mov r5, (r1)
+    mov #^O240, @#SMPCMD    ;Write Address
+    jsr pc, (r2)
+    mov #START/256, @#SMPIO ;high address byte
+    jsr pc, (r2)
+    mov #START, r3
+    mov r3, @#SMPIO ;high address byte
+    jsr pc, (r2)
+    tst @#SMPCMD
+    jsr pc, (r2)
+    ; load data
+    mov #END-START, r4      ;number of bytes
+    mov #^O320, @#SMPCMD    ;Read Postincrement
+    jsr pc, (r2)
+    bic #8, r5      ;reading from the SMP
+    mov r5, (r1)
+    jsr pc, (r2)
+nxtb:   
+    movb @#SMPIO, (r3)+ ;read data byte from the SMP to the RAM
+    jsr pc, (r2)
+    sob r4, nxtb        ;next data byte
+    tst @#SMPCMD
+    jsr pc, (r2)
+    ; start the loaded program
+    mov #^O340, -(sp)   ;user mode, interrupts disabled
+    mov #START, -(sp)
+    rti
+    
+    .= 200
+    .word keyIntHandle, 0
+
+bumpAnimation:
+    mov #birdTrackBump, @#birdTrackPos
+    mov #6, r2
+bumpAnimationDelay:
+    jsr pc, waitScreen
+    mov #clearScreenAdr, @#LCDINA
+    sob r2, bumpAnimationDelay
+bumpAnimationLoop:
+    rts pc
+
+backupScreen:
+    mov #color0, r0
+    mov #backupColors, r1
+    br copyScreen
+
+restoreScreen:
+    jsr pc, screenTransition
+
+resetBirdBkg:
+    mov #birdBkg, r0
+    clr r3
+    mov #9*2*4, r2
+resetBirdBkgLoop:
+    mov r3, (r0)+
+    sob r2, resetBirdBkgLoop
+    mov #9*2, r2
+    add #^O177777, r3
+    bcc resetBirdBkgLoop
+
+    mov #color0, r1
+    mov #backupColors, r0
+copyScreen:
+    mov #colorSize*5/2,r2
+copyScreenLoop:
+    mov (r0)+, (r1)+
+    sob r2, copyScreenLoop
+    rts pc
+
+delayRedrawAndChangeColor:
+    jsr pc, waitScreen
+setColor:
+    mov #currentColor, r0
+    mov (r0), @#LCDINA
+changeColor:
+    add #colorSize, (r0)   
+    cmp (r0), #color4
+    rts pc
+
+screenTransition:
+    mov #5, r2
+screenTransitionNextFrame:
+    mov #3, r3
+screenTransitionDelayRepeat:
+    clr r1
+screenTransitionDelay:
+    jsr pc, waitScreen
+    mov #currentColor, r0
+    inc r1
+    cmp r1, r2
+    bge screenTransitionWhite
+    mov (r0), @#LCDINA
+    br screenTransitionNext
+screenTransitionWhite:
+    mov #clearScreenAdr, @#LCDINA
+screenTransitionNext:
+    jsr pc, changeColor
+    ble screenTransitionDelay
+    mov #color0,  (r0)
+    sob r3, screenTransitionDelayRepeat
+    sob r2, screenTransitionNextFrame
+    rts pc
+
+keyIntHandle:
+    mtps #^O340
+    mov #SMPBAUD, r1
+    mov #8, (r1)+ ;@#SMPBAUD
+    mov r1, r0
+    mov #^B11110010, (r1)+ ;@#SMPCS
+    clr (r1);@#SMPCMD
+waitGetKey:
+    tstb (r0) ;@#SMPCS
+    bpl waitGetKey
+    tst (r1);@#SMPCMD
+waitGetKey1:
+    tstb (r0) ;@#SMPCS
+    bpl waitGetKey1
+
+    mov #^B11100000, (r0) ;@#SMPCS
+    mov #1, @#SMPBAUD
+    clr (r1);@#SMPCMD
+waitGetKey2:
+    tstb (r0) ;@#SMPCS
+    bpl waitGetKey2
+    tst (r1);@#SMPCMD
+
+    mov #1, @#keyPressed
+    rtt
+
+loading:
+    .byte 126, 136, 136, 126, 0, 198, 40, 16, 254, 0, 108, 146, 130, 68, 0, 252, 10, 10, 240, 0, 112, 136, 136, 254, 0, 128, 128, 254, 0, 126, 136, 136, 126, 0, 108, 146, 130, 68
+
+    .= 512
+
+START:
+    jsr pc, backupScreen
+
+    mov #^B11100000, @#SMPCS
+    mov #BOUDRATE, @#SMPBAUD 
+    clr @#SMPCMD
+    mtps #^O000
+    mtps #^O340
+    clr @#keyPressed
+
+    jsr pc, mainScreenDraw
+    mov #getReadyTrackEnd, @#birdTrackPos
+    mov #currentColor, r0
+mainScreenLoop:
+    mov sp, r5
+    mov (r0), sp
+    add #6*SCR_WIDTH_B+8, sp  
+    mov #SCR_WIDTH_B-4, r3
+    mov #2, r4
+
+shiftHalfMainScreen:
+    mov #52/2, r2
+shiftDirection:
+    tst #0
+    bgt shiftMainScreenDown
+    beq mainScreenSkeepShift
+
+    mov #SCR_WIDTH_B+4, r3
+    add #4, sp
+shiftMainScreenUp:
+    rolb -4(sp)
+    rolb (sp)
+    rolb -(sp)
+    adcb -(sp)
+    add r3, sp
+    sob r2, shiftMainScreenUp
+    sub #4, sp
+    br shiftMainScreenNextHalf
+
+shiftMainScreenDown:
+    asrb -2(sp)
+    rorb (sp)+
+    rorb (sp)+
+    rorb (sp)
+    add r3, sp
+    sob r2, shiftMainScreenDown
+shiftMainScreenNextHalf:
+    sub #SCR_SIZE_B-1, sp
+    sob r4, shiftHalfMainScreen
+
+mainScreenSkeepShift:
+    mov r5, sp
+    mov @#currentColor, r0
+    jsr pc, moveGround
+    ;jsr pc, color2LCD
+    
+    ;jsr pc, delayRedrawAndChangeColor
+
+    ;jsr pc, waitScreen
+    mov #currentColor, r0
+    mov (r0), @#LCDINA
+    add #colorSize, (r0)   
+    cmp (r0), #color4
+
+    ble mainScreenLoop
+    mov #color0,  (r0)
+
+;    mov #-1, @#shiftDirection+2
+    mov #birdTrackPos, r1
+    dec (r1)
+    movb @(r1), r3
+    mov r3, @#shiftDirection+2
+    cmp (r1), #getReadyTrackStart
+    bgt 1$
+    mov #getReadyTrackEnd, (r1)
+1$:
+    asr @#keyPressed
+    bcc mainScreenLoop
+    br newGame
+
+
+startGetReadyClear:
+    cmp #getReadyState, @#gameState
+    bgt startGetReadyClearReturn
+    mov #2, @#birdAnimationSpeed+2
+    mov #-17, @#gameState
+startGetReadyClearReturn:
+    rts pc
+
+restoreColorAfterGetReady:
+    inc (r0);r0 = #gameState
+    beq getReadyLoop
+    mov (r0), r3
+    asr r3
+    asr r3
+    mul #-colorSize, r3
+    add #color0+8, r3
+
+    mov backupOffset-8(r3), r4
+    mov birdBkgAdrOffset-8(r3), r1
+    mov #9*2, r2
+    mov r2, r5
+clearBirdBkpLoop:
+    mov r4, (r1)+
+    sob r2, clearBirdBkpLoop
+
+    bit #1, (r0)
+    beq otherHalf
+    add #SCR_SIZE_B/2, r3
+otherHalf:
+    
+    mov r3, r1
+    add #backupOffset, r1
+    ;mov #9*2, r5
+    mov #SCR_HEIGHT/4, r2
+restoreColorAfterGetReadyLoop:
+    mov (r1)+, (r3)+
+    mov (r1)+, (r3)+
+    mov (r1)+, (r3)+
+    mov (r1)+, (r3)+
+    mov (r1)+, (r3)+
+    mov (r1)+, (r3)+
+    mov (r1), (r3)
+    add r5, r3
+    add r5, r1
+    sob r2, restoreColorAfterGetReadyLoop
+
+    cmp (r0), #getReadyState
+    bne MAIN
+    clr (r0)
+    br MAIN
+
+gameOver:
+updateBestScore:
+    mov #score, r0
+    mov #scoreBest, r1
+    mov #4, r2
+updateBestScoreCompare:
+    cmp (r0)+, (r1)+
+    blt updateBestScoreExit
+    bne updateBestScoreCopy
+    sob r2, updateBestScoreCompare
+    br updateBestScoreExit
+updateBestScoreCopy:  
+    mov -(r0), -(r1)
+updateBestScoreCopyLoop:
+    mov (r0)+, (r1)+
+    sob r2, updateBestScoreCopyLoop
+updateBestScoreExit:
+
+    jsr pc, screenTransition
+    jsr pc, GameOverDraw
+gameOverLoop:
+    jsr pc, delayRedrawAndChangeColor
+    ble gameOverLoop
+    mov #color0,  (r0)  
+    asr -(r0) ;@#keyPressed
+    bcc gameOverLoop
+
+newGame:
+    jsr pc, restoreScreen
+    jsr pc, getReadyDraw
+    mov #1, @#birdAnimationSpeed+2
+    mov #birdStartY, @#birdY
+    mov #birdStartY, @#birdYPre+2
+    mov #-50, @#pipe2X
+    mov #-50-pipeSpace-pipeWidth, @#pipe1X
+    mov #score, r0
+    clr (r0)+
+    ;mov #9*3, (r0)+
+    clr (r0)+
+    clr (r0)+
+    clr (r0)
+resetBirdTrackPos:
+    mov #getReadyTrackEnd, @#birdTrackPos
+getReadyLoop:
+    mov #getReadyState, @#gameState
+    cmp #getReadyTrackStart, @#birdTrackPos
+    beq resetBirdTrackPos
+
+
+
+MAIN:
+    jsr pc, drawAll
+
+    mov #currentColor, r0
+    mov (r0), @#LCDINA
+    add #colorSize, (r0)   
+    cmp (r0), #color4
+    ble MAIN
+    mov #color0,  (r0)  
+
+    asr -(r0) ;r0=#keyPressed
+    bcc notJump
+    tst @#gameState
+    beq jumpBird
+    bpl notJump
+    jsr pc, startGetReadyClear
+jumpBird:
+    mov #birdTrackEnd, @#birdTrackPos
+notJump:
+
+birdAnimationSpeed:
+    add #1, -(r0) ;r0=#birdAnimationPos
+    bic #^O177760, (r0)
+    cmp #birdTrackFlapCutoff, @#birdTrackPos
+    ble 1$
+    clr (r0)
+1$:
+
+    dec -(r0)   ;r0=#birdTrackPos
+    movb @(r0), r3
+    ;clr r3 ;uncomment for test
+    mov -(r0), @#birdYPre+2 ;r0 = birdY
+    add r3, (r0)    ;r0 = birdY
+    cmp (r0), #birdMaxBottomY
+    bcs birdInSky
+    bge birdBelowGround
+    clr (r0)    ;r0 = birdY
+birdInSky:
+    tst -(r0) ;r0 = #gameState
+    beq inGame
+    bgt MAIN ;#collisionState
+    ;#getReadyState
+    mov #restoreColorAfterGetReady, pc
+birdBelowGround:
+    mov #birdMaxBottomY, (r0) ;r0 = birdY
+    cmp -(r0), #gameOverState ;r0 = #gameState
+    beq gameOver
+    br collision
+inGame:
+
+    ;exchange pipe1-2
+    mov -(r0), r3 ;27 ;r0=pipe2Shift 
+    mov -2(r0), (r0) ;46
+    mov r3, -(r0) ;29 ;new pipe1Shift -> r3 
+    mov -(r0), r1 ;27 ;r0=pipe2X; new pipe1X -> r1 
+    mov -2(r0), r2 ;37 ;new pipe2X -> r2 
+    mov r2, (r0) ; ;27
+    inc r1 ;12
+    mov r1, -(r0) ;29 ;r0 = pipe1X
+    cmp r1, #nextPipeStart
+    blt randomPipe1Shift
+    cmp r1, #SCR_HEIGHT ;29
+    blt checkScores
+
+    ;when pipe out off screen, collision and scores excluded
+    mov #nextPipeStart, (r0) ;27
+randomPipe1Shift:
+nextPipeShiftValue:
+    add #0, r3
+    add @#birdY, r3
+    clr r2
+    div #6, r2
+    mov r3, @#nextPipeShiftValue+2
+    asl r3
+    mov r3, @#pipe1Shift
+    br MAIN
+
+checkScores:
+    cmp  r1, #-pipeWidth/2+birdX
+    bne skipScore
+incScore:
+    clr -(r0) ;32 ;r0 = score+4*2
+    add #digitWidth, -(r0) ;46
+    cmp (r0)+, #9*digitWidth ;37
+    bgt incScore
+    br MAIN
+skipScore:
+
+checkCollision:  
+    cmp r1, r2
+    bgt r1Bgtr2
+    mov r2, r1
+    mov @#pipe2Shift, r3    ;37
+r1Bgtr2:
+    cmp r1, #birdX+birdWidth-2
+    bge MAIN
+    cmp r1, #birdX-pipeWidth
+    ble MAIN
+    asl r3
+    asl r3
+    add #22, r3
+    sub @#birdY, r3
+    add #27-7, r3
+    bcs MAIN
+    ;br MAIN ;uncomment for test
+    jsr pc, bumpAnimation
+collision:
+    inc @#gameState ;= #collisionState
+    br MAIN
+
+
+drawAll:
+fixBirdBkg:  
+    mov @#currentColor, r0
+    mov birdBkgAdrOffset(r0), r2
+birdYPre:
+    mov #0, r1
+    asr r1
+    asr r1
+    add r0, r1
+
+    add #birdXonScr-1, r1
+    mov #SCR_WIDTH_B-2, r4
+    .REPT 8
+    mov (r2)+, (r1)+
+    mov (r2)+, (r1)
+    add r4, r1
+    .ENDM
+    mov (r2)+, (r1)+
+    mov (r2), (r1)
+
+drawPipe:  
+    mov r0, r2
+
+    tst @#gameState
+    bpl drawPipe1
+    mov #drawPipeExit, pc
+drawPipe1:
+
+    mov @#pipe1Shift, r4
+    mov r0, r5  ;r0 = @#currentColor from fixBirdBkg
+    add #SCR_SIZE_B, r5
+    mov @#Pipe1X, r3
+    ;mul #SCR_WIDTH_B, r3
+    ;add r3, r0
+    asl r3
+    sub r3, r0
+    asl r3
+    asl r3
+    asl r3
+    asl r3
+    add r3, r0
+    ;
+    mov #255, r3
+
+drawPipeFixBkg:
+    cmp r0, r2
+    blt drawPipeFirstLine
+    cmp r0, r5
+    blt drawPipeFixBkgTop
+    sub #SCR_SIZE_B-1, r0
+    swab r3
+drawPipeFixBkgTop:
+    add r4, r0
+    movb backupOffset+4(r0), 4(r0) ;66
+    movb backupOffset+12(r0), 12(r0) ;66
+    sub r4, r0
+
+drawPipeFirstLine:
+    add #SCR_WIDTH_B, r0
+    cmp r0, r2
+    blt drawHeads
+    cmp r0, r5
+    blt drawPipeFirstLineTop
+    swab r3
+    bmi drawPipeExit
+    sub #SCR_SIZE_B-1, r0
+drawPipeFirstLineTop:
+    mov backupOffset(r0), r1
+    movb r1, (r0)
+    add r4, pc
+    br t6
+    br t5
+    br t4
+    br t3
+    br t2
+    movb r1, 12(r0)
+t2: movb r1, 10(r0)
+t3: movb r1, 8(r0)
+t4: movb r1, 6(r0)
+t5: movb r1, 4(r0)
+t6: movb r1, 2(r0)
+    add r4, pc
+    br l6
+    br l5
+    br l4
+    br l3
+    br l2
+    br l1
+l6: movb r1, 14(r0)
+l5: movb r1, 16(r0)
+l4: movb r1, 18(r0)
+l3: movb backupOffset+20(r0), 20(r0)
+l2: movb backupOffset+22(r0), 22(r0)
+l1: movb backupOffset+24(r0), 24(r0)
+
+drawHeads:
+    mov pipeColorAdrOffset(r2), r1
+
+drawPipeLoop:
+    add (r1)+, r0
+    cmp r0, r2 
+    blt drawPipeNext
+    cmp r0, r5
+    blt drawPipeTop
+    swab r3
+    bmi drawPipeExit
+    sub #SCR_SIZE_B-1, r0
+drawPipeTop:
+    tst (r1)+
+    bgt drawPipeSetLine
+    blt drawPipeClearLine
+drawPipeDrawHead:
+    add r4, r0
+    movb (r1)+, 4(r0)
+    movb (r1)+, 12(r0)
+    sub r4, r0
+    br drawPipeCheckEnd
+drawPipeClearLine:
+    bic r3, (r0)+
+    add r4, pc
+    br c6
+    br c5
+    br c4
+    br c3
+    br c2
+    bic r3, (r0)+
+c2: bic r3, (r0)+
+c3: bic r3, (r0)+
+c4: bic r3, (r0)+
+c5: bic r3, (r0)+
+c6: bic r3, (r0)
+    add #12, r0
+    add r4, pc
+    bic r3, (r0)+
+    bic r3, (r0)+
+    bic r3, (r0)+
+    bic r3, (r0)+
+    bic r3, (r0)+
+    bicb #^B11111100, (r0)
+    br drawPipeLineEnd
+drawPipeSetLine:
+    bis r3, (r0)+
+    add r4, pc
+    br s6
+    br s5
+    br s4
+    br s3
+    br s2
+    bis r3, (r0)+
+s2: bis r3, (r0)+
+s3: bis r3, (r0)+
+s4: bis r3, (r0)+
+s5: bis r3, (r0)+
+s6: bis r3, (r0)
+    add #12, r0
+    add r4, pc
+    bis r3, (r0)+
+    bis r3, (r0)+
+    bis r3, (r0)+
+    bis r3, (r0)+
+    bis r3, (r0)+
+    bisb #^B11111100, (r0)
+drawPipeLineEnd:
+    sub #SCR_WIDTH_B-6, r0
+    br drawPipeLoop
+drawPipeNext:
+    tst (r1)+
+    bne drawPipeLoop
+    tst (r1)+
+drawPipeCheckEnd:
+    tst (r1)
+    bge drawPipeLoop
+drawPipeExit:
+
+
+drawBird:  
+    mov sp, @#bkpsp+2
+    mov r2, r0  ;r2 = @#currentColor from drawPipe
+    mov birdColorAdrOffset(r0), r1
+    mov @#birdAnimationPos, r3
+    add birdAnimationTrack(r3), r1
+
+    mov birdBkgAdrOffset(r0), sp
+
+    mov @#birdY, r4
+    mov r4, r2
+    bic #^O177770, r4
+    sub #4, r4
+    neg r4
+    asr r2
+    asr r2
+    asr r2
+    asl r2
+    add r2, r0
+
+    add #birdXonScr, r0
+    mov #SCR_WIDTH_B-2, r5
+
+    mov #birdMaskShiftesHi+6, r2
+    add r4, r2
+    add r4, r2
+    mov (r2), r3
+    mov 16(r2), r2
+
+    ;backup and mask
+    .REPT 2
+    mov (r0)+, (sp)+
+    mov (r0), (sp)+
+    add r5, r0
+    .ENDM
+    .REPT 5
+    mov (r0), (sp)+
+    bic r3, (r0)+ ;29
+    mov (r0), (sp)+
+    bic r2, (r0) ;27
+    add r5, r0 ;12
+    .ENDM
+    mov (r0)+, (sp)+
+    mov (r0), (sp)+
+    add r5, r0
+    mov (r0)+, (sp)+
+    mov (r0), (sp)
+
+    ;draw bird
+    mov #255, sp
+    .REPT 4
+    mov (r1)+, r2 ;27
+    mov (r1)+, r3 ;27
+    ashc r4, r2 ;96
+    bisb r2, (r0) ;44
+    bic sp, r2 ;12
+    bis r2, -(r0) ;30
+    sub r5, r0 ;12
+
+    bisb r3, (r0) ;44
+    bic sp, r3 ;12
+    bis r3, -(r0) ;30
+    sub r5, r0 ;12
+    .ENDM
+    mov (r1), r2 ;27
+    ash r4, r2 ;81
+    bisb r2, (r0) ;44
+    bic sp, r2 ;12
+    bis r2, -(r0) ;30
+
+drawScores:
+    mov @#currentColor, r0
+    mov #digits, r4
+    mov #score, r2
+    mov (r2)+, r3
+    beq draw3digits
+    add r4, r3
+    bis #-256, SCR_WIDTH_B*4+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*5+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*6+scoreY+1(r0)
+    movb (r3), SCR_WIDTH_B*7+scoreY+1(r0)
+    bis #-512, SCR_WIDTH_B*8+scoreY+1(r0)
+    mov (r2)+, r3
+    add r4, r3
+    bis #-256, SCR_WIDTH_B*0+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*1+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*2+scoreY+1(r0)
+    movb (r3), SCR_WIDTH_B*3+scoreY+1(r0)
+    mov (r2)+, r3
+    add r4, r3
+    bis sp, SCR_WIDTH_B*28+scoreY(r0) ;sp = 255 from drawBird
+    movb (r3)+, SCR_WIDTH_B*29+scoreY(r0)
+    movb (r3)+, SCR_WIDTH_B*30+scoreY(r0)
+    movb (r3), SCR_WIDTH_B*31+scoreY(r0)
+    add (r2), r4
+    bis #127, SCR_WIDTH_B*23+scoreY(r0)
+    bis sp, SCR_WIDTH_B*24+scoreY(r0) ;sp = 255 from drawBird
+    movb (r4)+, SCR_WIDTH_B*25+scoreY(r0)
+    movb (r4)+, SCR_WIDTH_B*26+scoreY(r0)
+    movb (r4), SCR_WIDTH_B*27+scoreY(r0)
+    br drawScoresExit
+draw3digits:
+    mov (r2)+, r3
+    beq draw2digits
+    add r4, r3
+    bis #-256, SCR_WIDTH_B*2+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*3+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*4+scoreY+1(r0)
+    movb (r3), SCR_WIDTH_B*5+scoreY+1(r0)
+    bis #-512, SCR_WIDTH_B*6+scoreY+1(r0)
+    mov (r2)+, r3
+    add r4, r3
+    bis sp, SCR_WIDTH_B*30+scoreY(r0) ;sp = 255 from drawBird
+    movb (r3)+, SCR_WIDTH_B*31+scoreY(r0)
+    movb (r3)+, SCR_WIDTH_B*0+scoreY+1(r0)
+    movb (r3), SCR_WIDTH_B*1+scoreY+1(r0)
+    add (r2), r4
+    bis #127, SCR_WIDTH_B*25+scoreY(r0)
+    bis sp, SCR_WIDTH_B*26+scoreY(r0) ;sp = 255 from drawBird
+    movb (r4)+, SCR_WIDTH_B*27+scoreY(r0)
+    movb (r4)+, SCR_WIDTH_B*28+scoreY(r0)
+    movb (r4), SCR_WIDTH_B*29+scoreY(r0)
+    br drawScoresExit
+draw2digits:
+    mov (r2)+, r3
+    beq draw1digits
+    add r4, r3
+    bis #-256, SCR_WIDTH_B*0+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*1+scoreY+1(r0)
+    movb (r3)+, SCR_WIDTH_B*2+scoreY+1(r0)
+    movb (r3), SCR_WIDTH_B*3+scoreY+1(r0)
+    bis #-512, SCR_WIDTH_B*4+scoreY+1(r0)
+    add (r2), r4
+    bis #127, SCR_WIDTH_B*27+scoreY(r0)
+    bis sp, SCR_WIDTH_B*28+scoreY(r0) ;sp = 255 from drawBird
+    movb (r4)+, SCR_WIDTH_B*29+scoreY(r0)
+    movb (r4)+, SCR_WIDTH_B*30+scoreY(r0)
+    movb (r4), SCR_WIDTH_B*31+scoreY(r0)
+    br drawScoresExit
+draw1digits:
+    add (r2), r4
+    bis #127, SCR_WIDTH_B*29+scoreY(r0)
+    bis sp, SCR_WIDTH_B*30+scoreY(r0)   ;sp = 255 from drawBird
+    movb (r4)+, SCR_WIDTH_B*31+scoreY(r0)
+    movb (r4)+, SCR_WIDTH_B*0+scoreY+1(r0)
+    movb (r4), SCR_WIDTH_B*1+scoreY+1(r0)
+    bis #-512, SCR_WIDTH_B*2+scoreY+1(r0)
+drawScoresExit:
+
+bkpsp:
+    mov #0, sp
+
+    tst @#gameState
+    bgt moveGroundExit
+
+moveGround:
+    add #SCR_WIDTH_B*15+26, r0   ; r0 = @#currentColor from drawScores
+    cmp (r0), SCR_WIDTH_B*16(r0)
+    beq moveGroundTop
+    add #SCR_WIDTH_B*16, r0
+moveGroundTop:
+    mov (r0), r2
+    mov -SCR_WIDTH_B*1(r0), r3
+    mov -SCR_WIDTH_B*2(r0), r4
+    mov -SCR_WIDTH_B*3(r0), r5
+    mov r3, (r0)
+    mov r4, -SCR_WIDTH_B*1(r0)
+    mov r5, -SCR_WIDTH_B*2(r0)
+    mov r2, -SCR_WIDTH_B*3(r0)
+    mov r3, -SCR_WIDTH_B*4(r0)
+    mov r4, -SCR_WIDTH_B*5(r0)
+    mov r5, -SCR_WIDTH_B*6(r0)
+    mov r2, -SCR_WIDTH_B*7(r0)
+    mov r3, -SCR_WIDTH_B*8(r0)
+    mov r4, -SCR_WIDTH_B*9(r0)
+    mov r5, -SCR_WIDTH_B*10(r0)
+    mov r2, -SCR_WIDTH_B*11(r0)
+    mov r3, -SCR_WIDTH_B*12(r0)
+    mov r4, -SCR_WIDTH_B*13(r0)
+    mov r5, -SCR_WIDTH_B*14(r0)
+    mov r2, -SCR_WIDTH_B*15(r0)
+moveGroundExit:
+
+waitScreen:
+    tstb @#SMPCS
+    bpl waitScreen
+    mtps #^O000
+    mtps #^O340
+    mov #BOUDRATE, @#SMPBAUD
+    clr @#SMPCMD
+    rts pc
+
+
+drawBitmap:
+    movb (r1)+, r2
+    movb (r1)+, r4
+    mov (r1)+, r0
+    mov #color0+SCR_SIZE_B, r5
+    mov 4*2(r1), r3 ;last color as mask
+
+ drawBitmapLoop:
+    mov r0, -(sp)
+    mov r1, -(sp)
+    mov r2, -(sp)
+    mov r3, -(sp)
+    mov (r1), r1
+drawGetReadyLoop:   
+    cmp r0, r5
+    blt drawGetReadyLoopTop
+    sub #SCR_SIZE_B-1, r0
+drawGetReadyLoopTop:
+    
+    mov r4, -(sp)
+drawBitmapYLoop:
+    bicb (r3)+, (r0)
+    bisb (r1)+, (r0)+
+    inc r0
+    sob r4, drawBitmapYLoop
+    mov (sp)+, r4
+
+    sub r4, r0
+    sub r4, r0
+    add #SCR_WIDTH_B, r0
+    sob r2, drawGetReadyLoop
+
+    mov (sp)+, r3
+    mov (sp)+, r2
+    mov (sp)+, r1
+    mov (sp)+, r0
+    tst (r1)+   ;r1+2
+    add #colorSize, r0
+    add #colorSize, r5
+    cmp r0, #color4+colorSize
+    ble drawBitmapLoop
+    rts r1
+
+
+drawGameOverScores:
+    mov #-1, r4
+    mov #score, r1
+    mov #29*SCR_WIDTH_B+14, r0
+    jsr pc, drawNumber
+    mov #2, r4
+    mov #scoreBest, r1
+    mov #29*SCR_WIDTH_B+18, r0
+
+drawNumber:  
+    add @#currentColor, r0
+
+    mov #254, r5 ;space
+    ash r4, r5
+    movb r5, @#mask1+2
+    swab r5
+    movb r5, @#mask2+2
+    mov r4, @#numberShift+2
+
+    mov #4, r4
+drawNumberFindFirst:
+    sub #SCR_WIDTH_B*4, r0
+    mov (r1)+, r3
+    bne 1$
+    sob r4, drawNumberFindFirst
+    inc r4
+1$:
+    inc r4
+    br start$
+  
+drawNumberDigit:
+    add #digits+3, r3
+
+    mov #3, r2
+drawNumberLoop:
+    movb -(r3), r5
+    bic #^O177401, r5
+numberShift:
+    ash #0, r5
+mask1:
+    bic #0, (r0)
+    bisb r5, (r0)
+    swab r5
+mask2:
+    bic #0, -(r0)
+    bisb r5, (r0)
+    sub #SCR_WIDTH_B-2, r0
+    sob r2, drawNumberLoop
+
+    mov (r1)+, r3
+start$:
+    bis @#mask1+2, (r0)
+    bis @#mask2+2, -(r0)
+    sub #SCR_WIDTH_B-2, r0
+    sob r4, drawNumberDigit
+    rts pc
+
+birdAnimationTrack:
+    .word 0, 0, birdAnimSize, birdAnimSize, birdAnimSize*2, birdAnimSize*2, birdAnimSize, birdAnimSize
+
+birdTrack:
+    .byte 20, 4, 4, 4, 4, 4, 4, 4, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 2, 3, 2, 2, 2, 2, 2, 1,
+birdTrackFlapCutoff:
+    .byte 2, 1, 1, 1, 1, 0, 1, 0, 1, 0, 0, 
+birdTrackBump:
+    .byte 0, -1, 0, -1, 0, -1, -1, -1, -1, -2, -1, -2, -2,
+birdTrackEnd:
+getReadyTrackStart:
+    .byte  0, 0, 0, 1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, -1, 0, 0, -1, 0, 0, -1, 0, -1,
+getReadyTrackEnd:
+
+scoreBest:
+    .word 0*digitWidth, 0*digitWidth, 0*digitWidth, 0*digitWidth,
+    
+    scoreY = 4
+score:
+    .word 0*digitWidth, 0*digitWidth, 0*digitWidth, 0*digitWidth, 0
+
+pipe1X:
+    .word -32
+
+pipe2X:
+    .word -32-pipeSpace
+
+pipe1Shift:
+    .word 2
+    
+pipe2Shift:
+    .word 4
+
+
+    getReadyState = -1
+    inGameState = 0
+    collisionState = 1
+    gameOverState = 2
+gameState:
+    .word getReadyState
+
+    birdX = 42
+    birdXonScr = birdX-32*SCR_WIDTH_B+1
+    birdStartY = 63
+birdY:
+    .word birdStartY
+
+birdTrackPos:
+    .word birdTrackEnd
+
+birdAnimationPos:
+    .word 0
+
+keyPressed:
+    .word 0
+
+currentColor:
+    .word color0
+
+color0:
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
+pipeColorArd0:
+    .word pipeColor0
+birdColorAdr0:
+    .word birdColor0
+birdBkgAdr0:
+    .word birdBkgColorSize*0+birdBkg
+
+color1:
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 32896, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 49344, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 24672, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 8224, 0, 
+    .word pipeColor1
+    .word birdColor1
+    .word birdBkgColorSize*1+birdBkg
+
+color2:
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 33346, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 16930, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 8770, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 17026, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 33410, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 258, 33410, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 33346, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 17026, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 513, 33282, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 514, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 514, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 642, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 33346, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 258, 17058, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 41538, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 17026, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 513, 33410, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 258, 33410, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 33346, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 17058, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 513, 41474, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 514, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 514, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 674, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 41538, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 258, 17026, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 33410, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 33410, 12336, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 513, 33346, 37008, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 17058, 53456, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 41474, 28784, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 514, 12336, 0, 
+    .word pipeColor2
+    .word birdColor2
+    .word birdBkgColorSize*2+birdBkg
+
+color3:
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 129, 65150, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 44031, 32318, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33033, 15998, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65400, 32510, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2127, 65278, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31074, 65278, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20030, 65150, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 25090, 32510, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15873, 65278, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 65278, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 383, 65278, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 320, 65278, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32725, 65150, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16834, 32510, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 55038, 65150, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 49666, 32510, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 257, 65193, 65278, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 386, 65278, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 256, 43774, 65150, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 33290, 32510, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 65145, 65278, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2383, 65278, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31073, 65278, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20287, 65278, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24577, 65150, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16130, 32510, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 514, 65278, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 638, 65278, 14392, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 577, 65150, 39064, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32724, 32510, 55512, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16577, 65278, 30840, 0, 
+    .word 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 54783, 65278, 14392, 0, 
+    .word pipeColor3
+    .word birdColor3
+    .word birdBkgColorSize*3+birdBkg
+
+color4:
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49600, 129, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49600, 44031, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49376, 33033, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49376, 65400, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57536, 2159, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57536, 31203, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 61632, 20479, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57568, 58239, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57584, 65343, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49376, 32519, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49344, 16255, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49344, 1856, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49344, 32725, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49344, 16835, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57569, 55295, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57537, 49923, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 61825, 65449, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 61696, 387, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57600, 44031, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57344, 33547, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57344, 65401, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57344, 2415, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 61568, 31201, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57536, 28671, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49376, 57471, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 32960, 65343, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 32896, 32519, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 32896, 16255, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 32896, 1857, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 32896, 32724, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 49344, 16577, 65535, 65535, 65535, 
+    .word 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 65535, 57569, 54783, 65535, 65535, 65535, 
+    .word pipeColor4
+    .word birdColor4
+    .word birdBkgColorSize*4+birdBkg
+
+screenColorEnd:
+
+    colorSize = color1-color0
+    pipeColorAdrOffset = pipeColorArd0-color0
+    birdColorAdrOffset = birdColorAdr0-color0
+    birdBkgAdrOffset = birdBkgAdr0-color0
+
+    .EVEN
+pipeColor0:
+    .word SCR_WIDTH_B*0, 0
+    .byte 124, 62,
+    .word SCR_WIDTH_B*1, 1
+    .word pipeWidth-4*SCR_WIDTH_B, -1
+    .word SCR_WIDTH_B*1, 0
+    .byte 0, 0,
+    .word SCR_WIDTH_B*0, 1
+    .word SCR_WIDTH_B*1, 0
+    .byte 124, 62,
+    .word -1
+pipeColor1:
+    .word SCR_WIDTH_B*1, 0
+    .byte 254, 127,
+    .word SCR_WIDTH_B*1, 1
+    .word pipeWidth-5*SCR_WIDTH_B, -1
+    .word SCR_WIDTH_B*1, 0
+    .byte 130, 65,
+    .word SCR_WIDTH_B*0, 1
+    .word SCR_WIDTH_B*1, 0
+    .byte 254, 127,
+    .word -1
+pipeColor2:
+    .word SCR_WIDTH_B*2, 0
+    .byte 254, 127,
+    .word SCR_WIDTH_B*1, 1
+    .word pipeWidth-6*SCR_WIDTH_B, -1
+    .word SCR_WIDTH_B*1, 0
+    .byte 130, 65,
+    .word SCR_WIDTH_B*0, 1
+    .word SCR_WIDTH_B*1, 0
+    .byte 254, 127,
+    .word -1
+pipeColor3:
+    .word SCR_WIDTH_B*3, 0
+    .byte 254, 127,
+    .word SCR_WIDTH_B*1, 1
+    .word pipeWidth-8*SCR_WIDTH_B, -1
+    .word SCR_WIDTH_B*1, 0
+    .byte 194, 67,
+    .word SCR_WIDTH_B*1, 1
+    .word SCR_WIDTH_B*1, 0
+    .byte 254, 127,
+    .word -1
+pipeColor4:
+    .word SCR_WIDTH_B*4, 0
+    .byte 255, 255,
+    .word SCR_WIDTH_B*1, 1
+    .word pipeWidth-10*SCR_WIDTH_B, -1
+    .word SCR_WIDTH_B*1, 0
+    .byte 195, 195,
+    .word SCR_WIDTH_B*2, 1
+    .word SCR_WIDTH_B*1, 0
+    .byte 255, 255,
+    .word -1
+
+
+    pipeWidth = 14
+    pipeSpace = 25
+    nextPipeStart = 63-pipeSpace-pipeSpace-pipeWidth-pipeWidth
+
+    .EVEN
+    digitWidth = 3
+digits:
+    .byte 131, 187, 131, 251, 131, 187, 139, 171, 163, 131, 171, 171, 131, 239, 143
+    .byte 163, 171, 139, 163, 171, 131, 131, 191, 159, 131, 171, 131, 131, 171, 139
+
+
+getReadyDraw:
+    jsr r1, drawBitmap
+    .byte 44 ;width
+    .byte 2  ;height in bytes
+    .word 10*SCR_WIDTH_B+8+color0 ;start draw from
+    .word clearScreenAdr, getReadyColor1, getReadyColor1, getReadyColor2, getReadyColor2
+tapDraw:
+    jsr r1, drawBitmap
+    .byte 11 ;width
+    .byte 5  ;height in bytes
+    .word 27*SCR_WIDTH_B+12+color0 ;start draw from
+    .word clearScreenAdr, clearScreenAdr, tapColor1, tapColor2, tapColor3
+    rts pc
+
+tapColor1:
+    .byte 0, 64,0, 0, 0, 
+    .byte 0, 160, 2, 121, 192,
+    .byte 5, 160, 65, 74, 48,
+    .byte 4, 80, 240, 76, 16,
+    .byte 4, 17, 150, 80, 16,
+    .byte 4, 224, 240, 79, 16,
+    .byte 2, 176, 65, 74, 96,
+    .byte 1, 148, 2, 121, 128,
+    .byte 0, 100,0, 0, 0, 
+    .byte 0, 10,0, 0, 0, 
+    .byte 0, 20,0, 0, 0, 
+
+tapColor2:
+    .byte 0, 192,0, 0, 0, 
+    .byte 3, 160, 2, 121, 224,
+    .byte 5, 160, 65, 122, 112,
+    .byte 4, 240, 240, 126, 48,
+    .byte 7, 241, 246, 112, 48,
+    .byte 7, 240, 240, 127, 48,
+    .byte 3, 176, 65, 122, 96,
+    .byte 1, 212, 2, 121, 192,
+    .byte 0, 116,0, 0, 0, 
+    .byte 0, 10,0, 0, 0, 
+    .byte 0, 20,0, 0, 0,  
+
+tapColor3:
+    .byte 0, 192,0, 0, 0, 
+    .byte 3, 224, 2, 121, 224,
+    .byte 7, 224, 65, 123, 240,
+    .byte 7, 240, 240, 127, 240,
+    .byte 7, 241, 246, 127, 240,
+    .byte 7, 240, 240, 127, 240,
+    .byte 3, 240, 65, 123, 224,
+    .byte 1, 244, 2, 121, 192,
+    .byte 0, 116,0, 0, 0, 
+    .byte 0, 10,0, 0, 0, 
+    .byte 0, 20,0, ;0, 0, 
+
+getReadyColor1:
+    .byte 0, 0,
+    .byte 31, 248,
+    .byte 16, 72,
+    .byte 16, 72,
+    .byte 15, 240,
+    .byte 16, 8,
+    .byte 16, 8,
+    .byte 17, 60,
+    .byte 16, 4,
+    .byte 16, 132,
+    .byte 15, 244,
+    .byte 9, 72,
+    .byte 9, 200,
+    .byte 8, 8,
+    .byte 11, 240,
+    .byte 6, 8,
+    .byte 2, 8,
+    .byte 14, 72,
+    .byte 16, 8,
+    .byte 23, 124,
+    .byte 24, 132,
+    .byte 8, 4,
+    .byte 9, 36,
+    .byte 8, 4,
+    .byte 8, 4,
+    .byte 23, 252,
+    .byte 16, 8,
+    .byte 16, 136,
+    .byte 16, 8,
+    .byte 22, 8,
+    .byte 9, 252,
+    .byte 8, 4,
+    .byte 8, 4,
+    .byte 9, 252,
+    .byte 22, 8,
+    .byte 16, 8,
+    .byte 16, 136,
+    .byte 28, 8,
+    .byte 18, 8,
+    .byte 19, 240,
+    .byte 16, 8,
+    .byte 16, 8,
+    .byte 31, 248,
+    .byte 0, 0,
+
+getReadyColor2:
+    .byte 63, 252,
+    .byte 63, 252,
+    .byte 63, 108,
+    .byte 63, 108,
+    .byte 63, 252,
+    .byte 63, 236,
+    .byte 63, 238,
+    .byte 61, 190,
+    .byte 63, 246,
+    .byte 62, 246,
+    .byte 63, 254,
+    .byte 29, 238,
+    .byte 29, 236,
+    .byte 31, 236,
+    .byte 31, 252,
+    .byte 31, 236,
+    .byte 31, 236,
+    .byte 63, 108,
+    .byte 63, 238,
+    .byte 63, 254,
+    .byte 62, 246,
+    .byte 63, 246,
+    .byte 29, 182,
+    .byte 31, 246,
+    .byte 63, 246,
+    .byte 63, 254,
+    .byte 63, 238,
+    .byte 62, 236,
+    .byte 63, 236,
+    .byte 63, 238,
+    .byte 61, 254,
+    .byte 31, 246,
+    .byte 31, 246,
+    .byte 61, 254,
+    .byte 63, 238,
+    .byte 63, 236,
+    .byte 62, 236,
+    .byte 63, 236,
+    .byte 59, 236,
+    .byte 59, 252,
+    .byte 63, 236,
+    .byte 63, 236,
+    .byte 63, 252,
+    .byte 63, 252,
+
+
+    .EVEN
+gameOverDraw:
+cleanBackground:    ;for reduce size
+    mov #8*SCR_WIDTH_B+8+color0, r0
+    mov #5, r3
+gameOverDrawColors:   
+    mov #24, r2 ;width-4/2
+gameOverDrawClear:
+    bic #^B01111111, (r0)+
+    bic #^B11100000, (r0)
+    sub #8*SCR_WIDTH_B+2, r0
+    bic #^B0111111100000000, (r0)+
+    bic #^B1110000000000000, (r0)+
+    tst (r0)+
+    bic #^B0111111100000000, (r0)+
+    bic #^B1111111100000000, (r0)+
+    bic #^B1110000000000000, (r0)
+    add #8*SCR_WIDTH_B+20, r0
+    sob r2, gameOverDrawClear
+    add #colorSize-720, r0 ;15*2*24
+    sob r3, gameOverDrawColors
+
+    jsr r1, drawBitmap
+    .byte 52 ;width
+    .byte 6  ;height in bytes
+    .word 6*SCR_WIDTH_B+8+color0 ;start draw from
+    .word clearScreenAdr, gameOverColor1, gameOverColor1, gameOverColor2, gameOverColor2
+
+    mov #color1, @#currentColor
+drawGameOverScoresLoop:
+    jsr pc, drawGameOverScores
+    mov #currentColor, r0
+    add #colorSize, (r0)
+    cmp (r0), #color4
+    bne drawGameOverScoresLoop
+    mov #color0, (r0)
+
+medalDraw:
+    mov #medal1Color1, r2
+    mov #score, r0
+    mov (r0)+, r1
+    add (r0)+, r1
+    bne medalDrawFounded
+    mov (r0), r1
+ 
+    mov #3*digitWidth, r3
+medalDrawSearch:
+    cmp r1, r3 ;>30
+    bge medalDrawFounded
+    add #medal2Color1-medal1Color1, r2
+    sub #digitWidth, r3
+    bgt medalDrawSearch
+    rts pc
+
+medalDrawFounded:
+    mov #gameOverDrawMedalColors, r0
+    mov r2, (r0)+
+    mov r2, (r0)+
+    mov r2, (r0)
+
+    jsr r1, drawBitmap
+    .byte 13 ;width
+    .byte 2  ;height in bytes
+    .word 5*SCR_WIDTH_B+14+color0+1 ;start draw from
+    .word clearScreenAdr, clearScreenAdr
+gameOverDrawMedalColors:
+    .word medal1Color1, medal1Color1, medal1Color1
+    rts pc
+
+gameOverColor1:
+    .byte 0, 0, 0, 0, 0, 0
+    .byte 31, 240, 31, 255, 255, 252
+    .byte 32, 16, 32, 0, 0, 2
+    .byte 35, 240, 47, 0, 120, 2
+    .byte 60, 16, 36, 0, 8, 2
+    .byte 4, 16, 34, 0, 120, 2
+    .byte 28, 144, 47, 0, 8, 2
+    .byte 32, 16, 32, 0, 120, 2
+    .byte 47, 208, 43, 0, 0, 2
+    .byte 48, 48, 36, 0, 120, 2
+    .byte 16, 32, 47, 0, 16, 2
+    .byte 25, 56, 32, 0, 96, 2
+    .byte 36, 8, 47, 0, 0, 2
+    .byte 39, 232, 34, 0, 112, 2
+    .byte 32, 24, 44, 0, 40, 2
+    .byte 32, 16, 32, 0, 104, 2
+    .byte 63, 240, 47, 0, 0, 2
+    .byte 32, 16, 41, 0, 120, 2
+    .byte 48, 96, 47, 0, 64, 2
+    .byte 24, 48, 32, 0, 56, 2
+    .byte 32, 16, 32, 0, 0, 2
+    .byte 32, 16, 32, 0, 0, 2
+    .byte 31, 224, 32, 0, 0, 2
+    .byte 0, 56, 32, 0, 0, 2
+    .byte 15, 200, 32, 0, 0, 2
+    .byte 16, 8, 32, 0, 0, 2
+    .byte 16, 56, 34, 0, 0, 2
+    .byte 15, 32, 37, 0, 0, 2
+    .byte 16, 32, 47, 0, 0, 2
+    .byte 31, 96, 32, 0, 124, 2
+    .byte 32, 144, 47, 1, 131, 2
+    .byte 32, 144, 40, 2, 0, 130
+    .byte 36, 144, 39, 4, 0, 66
+    .byte 32, 16, 32, 8, 0, 34
+    .byte 47, 224, 39, 8, 0, 34
+    .byte 16, 16, 42, 16, 0, 18
+    .byte 16, 16, 39, 16, 0, 18
+    .byte 12, 96, 32, 144, 0, 18
+    .byte 16, 16, 47, 16, 0, 18
+    .byte 48, 16, 41, 16, 0, 18
+    .byte 47, 240, 47, 8, 0, 34
+    .byte 32, 16, 32, 136, 0, 34
+    .byte 35, 16, 41, 4, 0, 66
+    .byte 32, 16, 45, 2, 0, 130
+    .byte 57, 224, 47, 1, 131, 2
+    .byte 38, 16, 32, 0, 124, 2
+    .byte 32, 16, 47, 0, 0, 2
+    .byte 24, 224, 38, 0, 0, 2
+    .byte 32, 16, 47, 0, 0, 2
+    .byte 32, 16, 32, 0, 0, 2
+    .byte 31, 240, 31, 255, 255, 252
+    .byte 0, 0, 0, 0, 0, 0
+
+gameOverColor2:
+    .byte 63, 248, 127, 255, 255, 255
+    .byte 127, 248, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 248, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 126, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 184, 127, 255, 255, 255
+    .byte 127, 188, 127, 255, 255, 255
+    .byte 125, 188, 127, 255, 255, 255
+    .byte 119, 236, 127, 255, 255, 255
+    .byte 119, 236, 127, 255, 255, 255
+    .byte 127, 220, 127, 255, 255, 255
+    .byte 127, 220, 127, 255, 255, 255
+    .byte 127, 248, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 120, 127, 255, 255, 255
+    .byte 127, 184, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 252, 127, 255, 255, 255
+    .byte 63, 252, 127, 255, 255, 255
+    .byte 63, 236, 127, 255, 255, 255
+    .byte 63, 236, 127, 255, 255, 255
+    .byte 63, 188, 127, 255, 255, 255
+    .byte 63, 188, 127, 255, 255, 255
+    .byte 63, 176, 127, 255, 255, 255
+    .byte 127, 248, 127, 255, 255, 255
+    .byte 126, 216, 127, 255, 199, 255
+    .byte 126, 216, 127, 255, 1, 255
+    .byte 118, 216, 127, 252, 0, 127
+    .byte 127, 216, 127, 252, 0, 127
+    .byte 127, 248, 127, 248, 0, 63
+    .byte 127, 216, 127, 248, 0, 63
+    .byte 63, 216, 127, 240, 0, 31
+    .byte 63, 120, 127, 240, 0, 31
+    .byte 127, 216, 127, 240, 0, 31
+    .byte 127, 216, 127, 248, 0, 63
+    .byte 127, 248, 127, 248, 0, 63
+    .byte 127, 216, 127, 252, 0, 127
+    .byte 123, 216, 127, 252, 0, 127
+    .byte 127, 216, 127, 255, 1, 255
+    .byte 127, 248, 127, 255, 199, 255
+    .byte 119, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 126, 248, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 216, 127, 255, 255, 255
+    .byte 127, 248, 127, 255, 255, 255
+    .byte 63, 248, 127, 255, 255, 255
+
+medal1Color1:
+    .byte 0, 88, 
+    .byte 0, 182,
+    .byte 1, 105,
+    .byte 0, 0,
+    .byte 0, 1,
+    .byte 1, 255,
+    .byte 1, 255,
+    .byte 0, 255,
+    .byte 0, 65,
+    .byte 0, 0, 
+    .byte 1, 105,
+    .byte 0, 182,
+
+medal2Color1:
+    .byte 0, 88,
+    .byte 0, 182,
+    .byte 1, 105,
+    .byte 0, 0, 
+    .byte 0, 231,
+    .byte 1, 243,
+    .byte 1, 187,
+    .byte 1, 159,
+    .byte 0, 207,
+    .byte 0, 0, 
+    .byte 1, 105,
+    .byte 0, 182,
+
+medal3Color1:
+    .byte 0, 88,
+    .byte 0, 182,
+    .byte 1, 105,
+    .byte 0, 0, 
+    .byte 0, 238,
+    .byte 1, 255,
+    .byte 1, 147,
+    .byte 1, 199,
+    .byte 0, 198,
+    .byte 0, 0, 
+    .byte 1, 105, 
+    .byte 0, 182,
+    .byte 0, 88,
+
+mainScreenDraw:
+gameHeaderDraw:
+    jsr r1, drawBitmap
+    .byte 41 ;width
+    .byte 3  ;height in bytes
+    .word 17*SCR_WIDTH_B+8+color0 ;start draw from
+    .word clearScreenAdr, gameHeaderColor1, gameHeaderColor1, gameHeaderColor2, gameHeaderColor2
+clearBirdEye:
+    bicb #48, @#8*SCR_WIDTH_B+10+color4
+    bicb #48, @#9*SCR_WIDTH_B+10+color4
+mainScreenBirdDraw:
+    jsr r1, drawBitmap
+    .byte 9 ;width
+    .byte 1  ;height in bytes
+    .word 6*SCR_WIDTH_B+10+color0 ;start draw from
+    .word mainScreenBirdColor0, mainScreenBirdColor1, mainScreenBirdColor2, mainScreenBirdColor3, mainScreenBirdColor4
+footerDraw:
+    jsr r1, drawBitmap
+    .byte 44 ;width
+    .byte 1  ;height in bytes
+    .word 10*SCR_WIDTH_B+28+color0 ;start draw from
+    .word clearScreenAdr, clearScreenAdr, footerColor1, footerColor1, footerColor2
+    rts pc
+
+gameHeaderColor1:
+    .byte 0, 0, 0,
+    .byte 7, 252, 0,
+    .byte 4, 4, 0,
+    .byte 4, 4, 0,
+    .byte 4, 157, 252,
+    .byte 4, 2, 4,
+    .byte 4, 66, 4,
+    .byte 3, 186, 148,
+    .byte 4, 4, 132,
+    .byte 4, 151, 190,
+    .byte 4, 132, 66,
+    .byte 3, 132, 2,
+    .byte 2, 251, 30,
+    .byte 2, 4, 4,
+    .byte 2, 124, 4,
+    .byte 2, 7, 248,
+    .byte 2, 2, 4,
+    .byte 1, 242, 4,
+    .byte 6, 29, 188,
+    .byte 4, 18, 32,
+    .byte 6, 82, 60,
+    .byte 4, 3, 228,
+    .byte 6, 2, 4,
+    .byte 1, 253, 24,
+    .byte 2, 83, 140,
+    .byte 2, 114, 4,
+    .byte 2, 3, 132,
+    .byte 2, 4, 254,
+    .byte 3, 252, 2,
+    .byte 4, 36, 2,
+    .byte 4, 36, 254,
+    .byte 4, 167, 132,
+    .byte 4, 4, 4,
+    .byte 3, 184, 120,
+    .byte 4, 68, 4,
+    .byte 4, 4, 4,
+    .byte 4, 151, 252,
+    .byte 4, 4, 0,
+    .byte 4, 4, 0,
+    .byte 7, 252, 0,
+    .byte 0, 0, 0,
+
+gameHeaderColor2:
+    .byte 15, 254, 0,
+    .byte 15, 254, 0,
+    .byte 13, 246, 0,
+    .byte 15, 247, 254,
+    .byte 14, 223, 254,
+    .byte 15, 251, 246,
+    .byte 13, 123, 246,
+    .byte 7, 254, 214,
+    .byte 15, 244, 247,
+    .byte 14, 215, 255,
+    .byte 12, 245, 123,
+    .byte 15, 247, 251,
+    .byte 7, 255, 223,
+    .byte 7, 247, 247,
+    .byte 7, 125, 246,
+    .byte 7, 247, 252,
+    .byte 7, 251, 246,
+    .byte 15, 251, 246,
+    .byte 15, 223, 190,
+    .byte 13, 219, 190,
+    .byte 15, 91, 190,
+    .byte 13, 251, 246,
+    .byte 15, 251, 246,
+    .byte 15, 255, 220,
+    .byte 7, 123, 238,
+    .byte 7, 123, 246,
+    .byte 7, 255, 247,
+    .byte 7, 254, 255,
+    .byte 15, 255, 251,
+    .byte 13, 183, 251,
+    .byte 15, 182, 255,
+    .byte 14, 183, 247,
+    .byte 15, 247, 246,
+    .byte 7, 255, 124,
+    .byte 13, 119, 246,
+    .byte 15, 245, 246,
+    .byte 14, 215, 254,
+    .byte 15, 247, 254,
+    .byte 13, 246, 0,
+    .byte 15, 254, 0,
+    .byte 15, 254, 0,
+
+mainScreenBirdColor0:
+    .byte 0, 0, 16, 0, 0, 0, 0, 0, 0
+
+mainScreenBirdColor1:
+    .byte 4, 10, 26, 69, 65, 13, 50, 18, 12
+
+mainScreenBirdColor2:
+    .byte 4, 58, 90, 71, 71, 79, 50, 18, 12
+
+mainScreenBirdColor3:
+    .byte 12, 58, 90, 79, 127, 127, 54, 22, 12
+
+mainScreenBirdColor4:
+    .byte 12, 62, 94, 79, 127, 127, 62, 30, 12
+
+
+footerColor1:
+    .byte 252,
+    .byte 132,
+    .byte 172,
+    .byte 136,
+    .byte 252,
+    .byte 132,
+    .byte 252,
+    .byte 132,
+    .byte 180,
+    .byte 132,
+    .byte 252,
+    .byte 148,
+    .byte 164,
+    .byte 164,
+    .byte 252,
+    .byte 144,
+    .byte 252,
+    .byte 180,
+    .byte 180,
+    .byte 204,
+    .byte 252,
+    .byte 180,
+    .byte 180,
+    .byte 204,
+    .byte 120,
+    .byte 30,
+    .byte 18,
+    .byte 126,
+    .byte 196,
+    .byte 172,
+    .byte 196,
+    .byte 124,
+    .byte 152
+    .byte 236
+    .byte 148
+    .byte 252
+    .byte 148
+    .byte 148
+    .byte 164
+    .byte 252
+    .byte 196
+    .byte 172
+    .byte 196
+    .byte 124
+
+footerColor2:
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 248,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 240,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 120,
+    .byte 30,
+    .byte 30,
+    .byte 126,
+    .byte 252,
+    .byte 252,
+    .byte 252,
+    .byte 124,
+    .byte 248
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 252
+    .byte 124
+
+    .EVEN
+birdColor0:
+    .word 0, 1024, 1216, 2848, 2080, 2208, 576, 64, 128
+    .word 0, 512, 1600, 2464, 2080, 2208, 576, 64, 128
+    .word 0, 768, 1280, 2432, 2080, 2208, 576, 64, 128
+
+birdColor1:
+    .word 1792, 1152, 1216, 2976, 2080, 2208, 2880, 320, 128
+    .word 384, 576, 1600, 2464, 2080, 2208, 2880, 320, 128
+    .word 224, 800, 1312, 2496, 2080, 2208, 2880, 320, 128
+
+birdColor2:
+    .word 1792, 1152, 1216, 3040, 2144, 2272, 2880, 1344, 128
+    .word 384, 576, 1600, 2528, 2144, 2272, 2880, 1344, 128
+    .word 224, 800, 1312, 2528, 2144, 2272, 2880, 1344, 128
+
+birdColor3:
+    .word 1792, 1408, 4032, 4064, 4064, 2528, 3040, 1984, 384
+    .word 384, 1728, 3776, 4064, 4064, 2528, 3040, 1984, 384
+    .word 224, 2016, 4000, 4064, 4064, 2528, 3040, 1984, 384
+
+birdColor4:
+    .word 1792, 1920, 4032, 4064, 4064, 2528, 3040, 1984, 384
+    .word 384, 1984, 4032, 4064, 4064, 2528, 3040, 1984, 384
+    .word 224, 2016, 4064, 4064, 4064, 2528, 3040, 1984, 384
+
+
+birdMaskShiftesHi:
+    .word 0, 256, 768, 1792, 3840, 7936, 15872, 31744
+
+birdMaskShiftesLow:
+    .word 63488, 61440, 57344, 49152, 32768, 0, 0, 0
+
+    birdMaxBottomY = 95
+    birdAnimSize = 18
+    birdColorSize = birdColor1-birdColor0
+    birdWidth = 9
+END:
+
+birdBkg:
+    birdBkpOffset = birdBkg-birdColor0
+    birdBkgColorSize = 9*2*2
+
+    colorsSize = colorSize*5
+    backupColors = 16384-colorsSize
+    clearScreenAdr = backupColors
+    backupOffset = backupColors - color0
