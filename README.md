@@ -10,7 +10,7 @@
 **[Исходный код](https://github.com/azya52/MK90/blob/master/TRex/trex.mac)**, на ассемблере MACRO-11
 
 ## [Веселая Птичка](https://github.com/azya52/MK90/tree/master/funnybird)
-[![Video](https://www.youtube.com/watch?v=GlUCAnwnc_E/0.jpg)](https://www.youtube.com/watch?v=GlUCAnwnc_E)
+[![Video](https://img.youtube.com/vi/GlUCAnwnc_E/0.jpg)](https://www.youtube.com/watch?v=GlUCAnwnc_E)
 
 **[Образ СМП](https://github.com/azya52/MK90/tree/master/funnybird/smp0.bin)**, на эмуляторе не будет работать должным образом. Для нормального контраста, батарейки/аккумуляторы не должны быть сильно разряженными.
 
