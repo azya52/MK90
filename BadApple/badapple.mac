@@ -22,19 +22,19 @@
     SCREEN_SIZE_B = 960
     SCREEN_SIZE_W = SCREEN_SIZE_B / 2
 
-    CACHE_END = 16384
-    CACHE_SIZE = CACHE_END - CACHE_TOP
+    BUFFER_END = 16384
+    BUFFER_SIZE = BUFFER_END - BUFFER_TOP
 
     TRANSFER_RATE = 6
     MAX_BYTES_TRANSM_PS = 140 ;~ max bytes per 1/128 sec. With TRANSFER_RATE = 5 ~ 140, 4 ~ 190, 3 ~ 240
     MAX_FRAME_SIZE = 455
     MAX_HALF_FRAME_SIZE = 280
 
-    PRELOADED_CACHE = CACHE_END - MAX_BYTES_TRANSM_PS
+    PRELOADED_BUFFER = BUFFER_END - MAX_BYTES_TRANSM_PS
 
     rSreenPtr = r1
-    rReadCachePtr = r2
-    rWriteCachePtr = r4
+    rReadBufferPtr = r2
+    rWriteBufferPtr = r4
 
     .MACRO WAITSMP
         tstb @#SMPCS
@@ -74,7 +74,7 @@ loader:
     tst @#SMPCMD
     jsr pc, (r2)
     ; load data
-    mov #PRELOADED_CACHE-512-2, r0      ;number of bytes
+    mov #PRELOADED_BUFFER-512-2, r0      ;number of bytes
     mov #512, r3
     mov #^O320, @#SMPCMD                ;Read Postincrement
     jsr pc, (r2)
@@ -94,8 +94,8 @@ START:
     mov #^B10000000, @#RTCB             ;Enable periodic interrupt
     mov #^B10110011, @#SMPCS            ;
     
-    mov #PRELOADED_CACHE, rWriteCachePtr
-    mov #CACHE_TOP, rReadCachePtr
+    mov #PRELOADED_BUFFER, rWriteBufferPtr
+    mov #BUFFER_TOP, rReadBufferPtr
 
     bic #^B11111110, r5                 ;use current SMP number
     bis r5, @#mSMPWriteCtrl             ;
@@ -118,7 +118,7 @@ dummyData_irq:
     rtt
 
 videoData_irq:
-    movb (r3), (rWriteCachePtr)+
+    movb (r3), (rWriteBufferPtr)+
     rtt
 
 SCREEN:
@@ -150,30 +150,31 @@ main:
     bgt main
     add #5, @#mFrameSyncCounter
 
-waitCacheLoader:
-    mov rWriteCachePtr, r0
-    sub rReadCachePtr, r0
-    bpl waitCacheLoaderCmp
-    add #CACHE_SIZE, r0
-waitCacheLoaderCmp:
+waitBufferLoader:
+    mov rWriteBufferPtr, r0
+    sub rReadBufferPtr, r0
+    bpl waitBufferLoaderCmp
+    add #BUFFER_SIZE, r0
+waitBufferLoaderCmp:
     cmp r0, #MAX_FRAME_SIZE
-    blt waitCacheLoader
+    blt waitBufferLoader
  
     mov #SCREEN, rSreenPtr
 
-    cmp rReadCachePtr, #CACHE_END-MAX_BYTES_TRANSM_PS-MAX_HALF_FRAME_SIZE
+    ;If we approach the buffer boundary, unpack with bounds checking
+    cmp rReadBufferPtr, #BUFFER_END-MAX_BYTES_TRANSM_PS-MAX_HALF_FRAME_SIZE
     bgt uncompsFrameWB
 
 uncompsFrame:
 uncompsFrame_header:
-    movb (rReadCachePtr)+, @#1$+2
+    movb (rReadBufferPtr)+, @#1$+2
 1$: mov #^X100, r5
 
     asr r5
     bcs uncompsFrame_special
 
 uncompsFrame_byte:
-    movb (rReadCachePtr)+, (rSreenPtr)+
+    movb (rReadBufferPtr)+, (rSreenPtr)+
     inc rSreenPtr
 
 uncompsFrame_next:
@@ -182,12 +183,12 @@ uncompsFrame_next:
     beq uncompsFrame_header
 
 uncompsFrame_special:
-    movb (rReadCachePtr)+, r0
+    movb (rReadBufferPtr)+, r0
     movb r0, @#1$+2
-    bis #^O177760, r0
-    asl r0
+    bis #^O177760, r0                           ;get distance
+    asl r0                                      ;
     add rSreenPtr, r0
-1$: add @#mulTable, pc
+1$: add @#mulTable, pc                          ;get length or special code
     .REPT 16
     movb (r0)+, (rSreenPtr)+
     inc rSreenPtr
@@ -202,9 +203,9 @@ uncompsFrame_special:
     br uncompsFrame_skip2
 
 uncompsFrame_skip:
-    dec rReadCachePtr
+    dec rReadBufferPtr
 uncompsFrame_skip2:
-    movb (rReadCachePtr)+, r0
+    movb (rReadBufferPtr)+, r0
     bic #^O177400, r0
     asl r0
     add r0, rSreenPtr
@@ -215,26 +216,26 @@ uncompsFrame_partEnd:
     bcs main
     mov #SCREEN+1, rSreenPtr
 
-    cmp rReadCachePtr, #CACHE_END-MAX_BYTES_TRANSM_PS-MAX_HALF_FRAME_SIZE
+    cmp rReadBufferPtr, #BUFFER_END-MAX_BYTES_TRANSM_PS-MAX_HALF_FRAME_SIZE
     bgt uncompsFrameWB_nextCheck
     br uncompsFrame_next
     
 
-    ;uncompress frame with cache boundary check
+    ;uncompress frame with framebuffer boundary check
 uncompsFrameWB:
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
-    bne uncompsFrameWB_header               ;
-    mov #CACHE_TOP, rReadCachePtr 
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
+    bne uncompsFrameWB_header                ;
+    mov #BUFFER_TOP, rReadBufferPtr 
 
 uncompsFrameWB_header:
-    movb (rReadCachePtr)+, @#1$+2
+    movb (rReadBufferPtr)+, @#1$+2
 1$: mov #^X100, r5
 
 uncompsFrameWB_nextCheck:
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
-    bne uncompsFrameWB_next                 ;
-uncompsFrameWB_toCacheTop:
-    mov #CACHE_TOP, rReadCachePtr         
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
+    bne uncompsFrameWB_next                  ;
+uncompsFrameWB_toBufferTop:
+    mov #BUFFER_TOP, rReadBufferPtr         
 
 uncompsFrameWB_next:
     asr r5
@@ -242,12 +243,12 @@ uncompsFrameWB_next:
     beq uncompsFrameWB_header
 
 uncompsFrameWB_special:
-    movb (rReadCachePtr)+, r0
+    movb (rReadBufferPtr)+, r0
     movb r0, @#1$+2
-    bis #^O177760, r0
-    asl r0
+    bis #^O177760, r0                        ;get distance
+    asl r0                                   ;
     add rSreenPtr, r0
-1$: add @#mulTable, pc
+1$: add @#mulTable, pc                       ;get length or special code
     .REPT 16
     movb (r0)+, (rSreenPtr)+
     inc rSreenPtr
@@ -255,33 +256,33 @@ uncompsFrameWB_special:
     .ENDM
     movb (r0), (rSreenPtr)+
     inc rSreenPtr
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
     bne uncompsFrameWB_next
-    br uncompsFrameWB_toCacheTop
+    br uncompsFrameWB_toBufferTop
     br uncompsFrame_partEnd
     br uncompsFrameWB_skip2
 
 uncompsFrameWB_skip:
-    dec rReadCachePtr
+    dec rReadBufferPtr
 uncompsFrameWB_skip2:
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
     bne 1$
-    mov #CACHE_TOP, rReadCachePtr
+    mov #BUFFER_TOP, rReadBufferPtr
 1$:
-    movb (rReadCachePtr)+, r0
+    movb (rReadBufferPtr)+, r0
     bic #^O177400, r0
     asl r0
     add r0, rSreenPtr
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
     bne uncompsFrameWB_next
-    br uncompsFrameWB_toCacheTop
+    br uncompsFrameWB_toBufferTop
 
 uncompsFrameWB_byte:
-    movb (rReadCachePtr)+, (rSreenPtr)+
+    movb (rReadBufferPtr)+, (rSreenPtr)+
     inc rSreenPtr
-    cmp rReadCachePtr, (sp)                 ;check the reader has reached the end of the cache
+    cmp rReadBufferPtr, (sp)                 ;check the reader has reached the end of the framebuffer
     bne uncompsFrameWB_next
-    br uncompsFrameWB_toCacheTop
+    br uncompsFrameWB_toBufferTop
 
 
 
@@ -292,21 +293,21 @@ SQW_irq:
     mNoteLengthCounter = . + 2
     dec #1
 SQW_switch:
-    beq startAudioReceive                    ;startAudioReceive or audioReceive or finishVideoReceive
+    beq audioReceive                         ;audioReceive or finishVideoReceive
     rtt
 
 finishVideoReceive:
     WAITSMP
-    movb @#SMPCMD, (rWriteCachePtr)+
+    movb @#SMPCMD, (rWriteBufferPtr)+
     WAITSMP
-    movb (r3), (rWriteCachePtr)+             ;r3 = SMPIO
+    movb (r3), (rWriteBufferPtr)+            ;r3 is SMPIO
 
 checkBounds:
-    cmp rWriteCachePtr, #CACHE_END-MAX_BYTES_TRANSM_PS
+    cmp rWriteBufferPtr, #BUFFER_END-MAX_BYTES_TRANSM_PS
     blt checkBounds_end
 setEndOfBuffer:
-    mov rWriteCachePtr, @#stack_top
-    mov #CACHE_TOP, rWriteCachePtr
+    mov rWriteBufferPtr, @#stack_top
+    mov #BUFFER_TOP, rWriteBufferPtr
 checkBounds_end:
 
     tst @#mNoteLengthCounter
@@ -314,7 +315,7 @@ checkBounds_end:
 
 startAudioReceive:
     mov #dummyData_irq, @#data_iv
-    mov #audioReceive-SQW_switch-2/2 + ^O001400, @#SQW_switch       ;BEQ audioReceive
+    mov #audioReceive-SQW_switch-2/2 + ^O001400, @#SQW_switch           ;BEQ audioReceive
 
 audioReceive:
     mAudioPtr = . + 2
@@ -334,7 +335,7 @@ audioReceive:
 
 startVideoReceive:
     mov #videoData_irq, @#data_iv
-    mov #finishVideoReceive-SQW_switch-2/2 + ^O000400, @#SQW_switch ;BR finishVideoReceive
+    mov #finishVideoReceive-SQW_switch-2/2 + ^O000400, @#SQW_switch     ;BR finishVideoReceive
 
     ;waiting for the audio freq completition
     tst @#SMPCMD
@@ -344,10 +345,10 @@ startVideoReceive:
 videoReceive:
 
 waitRenderer:
-    mov rReadCachePtr, r3
-    sub rWriteCachePtr, r3
+    mov rReadBufferPtr, r3
+    sub rWriteBufferPtr, r3
     bpl waitRendererCmp
-    add #CACHE_SIZE, r3
+    add #BUFFER_SIZE, r3
 waitRendererCmp:
     cmp r3, #MAX_BYTES_TRANSM_PS*2
     ble videoReceiveCancel
@@ -365,9 +366,8 @@ waitRendererCmp:
     rtt
 
 videoReceiveCancel:
-    ;com @#SCREEN+22
     mov #dummyData_irq, @#data_iv
-    mov #startAudioReceive-SQW_switch-2/2 + ^O001400, @#SQW_switch ;BEQ audioReceive
+    mov #audioReceive-SQW_switch-2/2 + ^O001400, @#SQW_switch           ;BEQ audioReceive
     rtt
 
 
@@ -446,7 +446,6 @@ sheetParts:
     .word sheetPart19
     .word sheetPart19
     .word sheetPart19
-    ;.word sheetPart19
     .word partPause
 
 sheetMusic:
@@ -3379,4 +3378,4 @@ noteLengths:
     .byte 200;192
     .byte 200
 
-CACHE_TOP:
+BUFFER_TOP:
