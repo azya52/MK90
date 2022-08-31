@@ -1,0 +1,254 @@
+    ;
+    ;   Video Player for MK 90
+    ;   AZYA
+	;	2022
+    ;
+        
+    .ENABL AMA
+    .ASECT
+    .RADIX 10
+
+    LCDINA = ^O164000
+    LCDINB = ^O164002
+    SMPIO = ^O164020
+    SMPBAUD = ^O164022
+    SMPCS = ^O164024
+    SMPCMD = ^O164026
+    RTCA = ^O165024
+    RTCB = ^O165026
+    RTCC = ^O165030
+
+    SCREEN = 10240
+    SCREEN_SIZE_B = 960
+    SCREEN_SIZE_W = SCREEN_SIZE_B/2
+
+    TRANSFER_RATE = 3
+
+    rBuf = r0
+    rSreenPtr = r1
+    rSMPIO = r2
+    rSMPCS = r3
+    rMulTblPtr = r4
+    rHeader = r5
+
+    .MACRO WAITSMP
+        tstb (rSMPCS)
+        bpl . - 2
+    .ENDM
+
+    .= 0
+    nop
+    br entry
+
+    .=32
+entry:
+    mtps #^O340                         ;Disable interrupts
+    mov #SCREEN, @#LCDINA
+    mov #^B1000100011000110, @#LCDINB   ;Set LCD refresh rate to 26Hz
+
+    mov #SCREEN_SIZE_W, r4
+    mov #SCREEN, r3
+clearScreenLoop:
+    clr (r3)+                           ;for a blank screen on boot
+    sob r4, clearScreenLoop
+
+
+loader:
+    ;mov #TRANSFER_RATE, @#SMPBAUD       ;transfer rate
+    bis #^B00001000, r5                 ;writing to the SMP
+    mov r5, (r1)
+    mov #^O250, @#SMPCMD                ;Write Address
+    jsr pc, (r2)
+    clr @#SMPIO                         ;low address byte
+    jsr pc, (r2)
+    mov #512 / 256, @#SMPIO             ;next address byte
+    jsr pc, (r2)
+    mov #512, @#SMPIO                   ;high address byte
+    jsr pc, (r2)
+    tst @#SMPCMD
+    jsr pc, (r2)
+    ; load data
+    mov #frames-512, r4                 ;number of bytes
+    mov #512, r3
+    mov #^O330, @#SMPCMD                ;Read Postincrement
+    jsr pc, (r2)
+    bic #^B01001000, r5                 ;writing to the SMP
+    mov r5, (r1)
+    jsr pc, (r2)
+nxtb:   
+    movb @#SMPIO, (r3)+                 ;read data byte from the SMP to the RAM
+    jsr pc, (r2)
+    sob r4, nxtb                        ;next data byte
+    jmp START
+
+
+SQW:
+    tst @#RTCC
+    mFrameSyncCounter = . + 2
+    dec #1
+    rti
+
+    .=192
+    .word SQW, ^O340
+
+
+goToFirstFrame:
+    WAITSMP
+    tst @#SMPCMD
+    WAITSMP
+    mov #8, @#SMPBAUD
+    mSMPWriteCtrl = . + 2
+    mov #^B10111000, (rSMPCS)           ;writing to the SMP0
+    mov #^O250, @#SMPCMD                ;Write Address
+    WAITSMP
+    clr (rSMPIO)                        ;high address byte
+    WAITSMP
+    mov #frames / 256, (rSMPIO)         ;next address byte
+    WAITSMP
+    mov #frames, (rSMPIO)               ;low address byte
+    WAITSMP
+    tst @#SMPCMD
+    WAITSMP
+    mov #^O330, @#SMPCMD                ;Read Postincrement
+    WAITSMP
+    mov #TRANSFER_RATE, @#SMPBAUD
+    mSMPReadCtrl = . + 2
+    mov #^B10110000, (rSMPCS)           ;reading from the SMP
+    clr @#frameIndex
+    br main
+
+
+START:
+    cmp mFrameDelay, #20
+    bge notChangeDisplayRR
+    mov #^B1000011011000110, @#LCDINB   ;Set LCD refresh rate to 32Hz
+notChangeDisplayRR:
+    mov #^B01001110, @#RTCA             ;512Hz
+    mov #^B10000000, @#RTCB             ;With IRQ 
+    
+    mov #SMPCS, rSMPCS
+    mov #SMPIO, rSMPIO
+    mov #mMulTablePtr, rMulTblPtr
+
+    bic #^B11111110, r5                 ;use the correct SMP
+    bis r5, @#mSMPWriteCtrl             ;
+    bis r5, @#mSMPReadCtrl              ;
+
+    mtps #0
+    br main
+
+
+    .=512    
+main:
+    tst @#mFrameSyncCounter
+    bgt main
+    add @#mFrameDelay, @#mFrameSyncCounter
+
+
+uncompsFrame:
+    mov #SCREEN, rSreenPtr
+
+uncompsFrame_header:
+    WAITSMP
+    mov (rSMPIO), rHeader
+    bic #^O177400, rHeader
+    add #^X100, rHeader
+
+    WAITSMP
+    asr rHeader
+    bcs uncompsFrame_special
+
+uncompsFrame_byte:
+    movb (rSMPIO), (rSreenPtr)+
+    inc rSreenPtr
+
+uncompsFrame_nextWait:
+    WAITSMP
+uncompsFrame_next:
+    asr rHeader
+    bcc uncompsFrame_byte
+    beq uncompsFrame_header
+
+uncompsFrame_special:
+    mov (rSMPIO), rBuf
+    movb rBuf, (rMulTblPtr)
+    bis #^O177760, rBuf                   ;get distance
+    asl rBuf                              ;
+    add rSreenPtr, rBuf
+    mMulTablePtr = . + 2
+    add @#mulTable, pc                    ;get length or special jump code
+    jmpStart = .
+    .REPT 16
+    movb (rBuf)+, (rSreenPtr)+
+    inc rSreenPtr
+    inc rBuf
+    .ENDM
+    movb (rBuf), (rSreenPtr)+
+    inc rSreenPtr    
+    br uncompsFrame_next
+
+uncompsFrame_skip:
+    movb (rMulTblPtr), rBuf
+    asl rBuf
+    add rBuf, rSreenPtr
+    br uncompsFrame_next
+
+uncompsFrame_skip2:
+    WAITSMP
+    mov (rSMPIO), rBuf
+    bic #^O177400, rBuf
+    asl rBuf
+    add rBuf, rSreenPtr
+    br uncompsFrame_nextWait
+
+uncompsFrame_noncompressed:
+    mov #SCREEN_SIZE_W, rHeader
+streamLoop:
+    WAITSMP
+    movb (rSMPIO), (rSreenPtr)+
+    inc rSreenPtr
+    sob rHeader, streamLoop
+    asr rSreenPtr
+    mov #SCREEN+1, rSreenPtr
+    bcc uncompsFrame_noncompressed
+
+uncompsFrame_partEnd:
+    asr rSreenPtr
+    mov #SCREEN+1, rSreenPtr
+    bcc uncompsFrame_nextWait
+
+
+    frameIndex = . + 2
+    inc #0
+    cmp @#frameIndex, @#mFrameCount
+    blt main
+    jmp goToFirstFrame
+
+
+    jmp_partEnd = uncompsFrame_partEnd - jmpStart
+    jmp_skip2 = uncompsFrame_skip2 - jmpStart
+    jmp_skip = uncompsFrame_skip - jmpStart
+    jmp_notcomp = uncompsFrame_noncompressed - jmpStart
+    .= . & 65280 + 256
+mulTable:
+    .word 0, jmp_skip, jmp_skip, jmp_skip, jmp_skip, jmp_skip, jmp_skip, jmp_skip, 
+    .word 6, jmp_skip, jmp_skip, jmp_skip, jmp_skip, jmp_notcomp, jmp_skip2, jmp_partEnd,
+    .word 12, 12, 12, 12, 12, 12, 12, 12
+    .word 18, 18, 18, 18, 18, 18, 18, 18
+    .word 24, 24, 24, 24, 24, 24, 24, 24
+    .word 30, 30, 30, 30, 30, 30, 30, 30
+    .word 36, 36, 36, 36, 36, 36, 36, 36
+    .word 42, 42, 42, 42, 42, 42, 42, 42
+    .word 48, 48, 48, 48, 48, 48, 48, 48
+    .word 54, 54, 54, 54, 54, 54, 54, 54
+    .word 60, 60, 60, 60, 60, 60, 60, 60
+    .word 66, 66, 66, 66, 66, 66, 66, 66
+    .word 72, 72, 72, 72, 72, 72, 72, 72
+    .word 78, 78, 78, 78, 78, 78, 78, 78
+    .word 84, 84, 84, 84, 84, 84, 84, 84
+    .word 90, 90, 90, 90, 90, 90, 90, 90
+
+
+mFrameCount = .
+mFrameDelay = . + 2
+frames = . + 4
