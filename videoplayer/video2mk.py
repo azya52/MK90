@@ -171,7 +171,7 @@ def convert(args, compressor):
         
         out_bin += data;
         if args.mac:
-            out_mac += get_mac(data, str(new_frame))
+            out_mac += get_mac(data, str(frame_count))
         
         frame_len = len(data)
         if max_len < frame_len:

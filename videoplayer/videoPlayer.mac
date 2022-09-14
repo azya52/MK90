@@ -22,7 +22,7 @@
     SCREEN_SIZE_B = 960
     SCREEN_SIZE_W = SCREEN_SIZE_B/2
 
-    TRANSFER_RATE = 3
+    TRANSFER_RATE = 4                   ;3 - 6
 
     rBuf = r0
     rSreenPtr = r1
@@ -54,7 +54,7 @@ clearScreenLoop:
 
 
 loader:
-    ;mov #TRANSFER_RATE, @#SMPBAUD       ;transfer rate
+    mov #TRANSFER_RATE, @#SMPBAUD       ;transfer rate
     bis #^B00001000, r5                 ;writing to the SMP
     mov r5, (r1)
     mov #^O250, @#SMPCMD                ;Write Address
@@ -96,7 +96,6 @@ goToFirstFrame:
     WAITSMP
     tst @#SMPCMD
     WAITSMP
-    mov #8, @#SMPBAUD
     mSMPWriteCtrl = . + 2
     mov #^B10111000, (rSMPCS)           ;writing to the SMP0
     mov #^O250, @#SMPCMD                ;Write Address
@@ -111,7 +110,6 @@ goToFirstFrame:
     WAITSMP
     mov #^O330, @#SMPCMD                ;Read Postincrement
     WAITSMP
-    mov #TRANSFER_RATE, @#SMPBAUD
     mSMPReadCtrl = . + 2
     mov #^B10110000, (rSMPCS)           ;reading from the SMP
     clr @#frameIndex

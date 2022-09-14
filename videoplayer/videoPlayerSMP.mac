@@ -22,7 +22,7 @@
     SCREEN_SIZE_B = 960
     SCREEN_SIZE_W = SCREEN_SIZE_B/2
 
-    TRANSFER_RATE = 4
+    TRANSFER_RATE = 4                   ;3 - 6
 
     rBuf = r0
     rSreenPtr = r1
@@ -94,7 +94,6 @@ goToFirstFrame:
     WAITSMP
     tst @#SMPCMD
     WAITSMP
-    mov #8, @#SMPBAUD
     mSMPWriteCtrl = . + 2
     mov #^B10111000, (rSMPCS)           ;writing to the SMP0
     mov #^O240, @#SMPCMD                ;Write Address
@@ -107,7 +106,6 @@ goToFirstFrame:
     WAITSMP
     mov #^O320, @#SMPCMD                ;Read Postincrement
     WAITSMP
-    mov #TRANSFER_RATE, @#SMPBAUD
     mSMPReadCtrl = . + 2
     mov #^B10110000, (rSMPCS)           ;reading from the SMP
     clr @#frameIndex
